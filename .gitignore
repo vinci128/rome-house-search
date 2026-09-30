@@ -1,0 +1,18 @@
+# Ambiente e dipendenze
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Risultati delle ricerche
+risultati_casa.json
+risultati_casa.csv
+
+# Ambiente
+.env
+.DS_Store
