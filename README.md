@@ -80,7 +80,7 @@ python3 cerca_casa.py --links
 | ------------------------- | ----------------------------------------------------------- |
 | `--budget €`              | budget totale, ristrutturazione compresa                     |
 | `--locali N`              | numero minimo di locali                                       |
-| `--zona NOME`             | `eur`, `montesacro`, `torrino`, `torrino-mezzocammino`, `trieste` (ripetibile) |
+| `--zona NOME`             | `eur`, `garbatella`, `ostiense`, `montesacro`, `torrino`, `torrino-mezzocammino`, `trieste` (ripetibile) |
 | `--mq-ideale` / `--mq-minimo` | superficie ideale nel punteggio / scarto minimo             |
 | `--pagine N`              | pagine di risultati da leggere per sito e zona               |
 | `--margine FRAC`          | quota sopra il budget ammessa per la trattativa (`0.12`)     |

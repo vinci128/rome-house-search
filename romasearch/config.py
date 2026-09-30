@@ -63,6 +63,22 @@ ZONE: dict[str, Zona] = {
         ricerca_casa="montesacro",
         indirizzo_fallback="Roma - Montesacro",
     ),
+    "garbatella": Zona(
+        nome="garbatella",
+        etichetta="Garbatella (quartiere EUR)",
+        slug_immobiliare="garbatella-roma",
+        slug_idealista="garbatella",
+        ricerca_casa="garbatella",
+        indirizzo_fallback="Roma - Garbatella",
+    ),
+    "ostiense": Zona(
+        nome="ostiense",
+        etichetta="Ostiense (vicino a Roma Tre)",
+        slug_immobiliare="ostiense-roma",
+        slug_idealista="ostiense",
+        ricerca_casa="ostiense",
+        indirizzo_fallback="Roma - Ostiense",
+    ),
     "trieste": Zona(
         nome="trieste",
         etichetta="Trieste (quartiere Coppedè)",

@@ -9,14 +9,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-
-from bs4 import BeautifulSoup, Tag
+from typing import TYPE_CHECKING
 
 from ..config import Config, Zona
 from ..formato import euro
 from ..http import Limitatore, scarica
 from ..models import Annuncio
 from ..parsing import estrai_dalla_scheda
+
+if TYPE_CHECKING:
+    from bs4 import Tag
 
 LIMITI_SCHEDE = 40
 MAX_CARATTERI_TITOLO = 90
@@ -47,7 +49,9 @@ def _primo(nodo: Tag, selettori: Iterable[str]) -> Tag | None:
 def _testo(nodo: Tag | None) -> str:
     if nodo is None:
         return ""
-    if isinstance(nodo, Tag):
+    # NavigableStringTruth non è un Tag ma ha get_text: si accetta qualunque
+    # oggetto con il metodo, così non serve importare bs4 qui.
+    if hasattr(nodo, "get_text"):
         return nodo.get_text(" ", strip=True)
     return str(nodo).strip()
 
@@ -92,6 +96,8 @@ def _senza_annidate(cards: list[Tag]) -> list[Tag]:
 
 def estrai_annunci(html: str, profilo: ProfiloSito, zona: Zona) -> list[Annuncio]:
     """Estrae gli annunci da una pagina di risultati."""
+    from bs4 import BeautifulSoup  # noqa: PLC0415 - vedi nota in fondo al modulo
+
     soup = BeautifulSoup(html, "lxml")
 
     cards: list[Tag] = []
@@ -192,3 +198,7 @@ def scarica_e_estrai(
         )
 
     return annunci, problemi
+
+
+# Nota: come in http.py, BeautifulSoup è importato dove serve davvero (parsing
+# delle pagine). Così l'URL di ricerca si ottiene senza dipendenze installate.

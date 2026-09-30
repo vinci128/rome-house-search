@@ -1,6 +1,9 @@
 """Test della CLI: opzioni, output, --links, esportazione."""
 
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -213,3 +216,55 @@ def test_config_da_argomenti_ricalcola_i_derivati():
         ["--budget", "500000", "--mq-riferimento", "100"]))
     assert cfg.prezzo_max_ricerca == 560_000
     assert cfg.prezzo_max_da_ristrutturare == 430_000
+
+
+# ─── Dipendenze ──────────────────────────────────────────────────────────────────
+#
+# Caso reale: `python3 cerca_casa.py` con il Python di sistema invece di quello
+# del virtualenv, che porta a un ModuleNotFoundError incomprensibile.
+
+BLOCCA_DEPENDENZE = """
+import sys
+
+class _Bloccante:
+    def find_spec(self, nome, percorso=None, target=None):
+        radice = nome.split(".")[0]
+        if radice in {"bs4", "lxml", "requests", "soupsieve"}:
+            raise ModuleNotFoundError(f"No module named {nome!r}", name=nome)
+        return None
+
+sys.meta_path.insert(0, _Bloccante())
+"""
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_i_links_funzionano_senza_dipendenze_installate():
+    """--links costruisce solo URL: non deve richiedere requests né bs4."""
+    risultato = subprocess.run(
+        [sys.executable, "-c",
+         BLOCCA_DEPENDENZE + "\nimport runpy, sys; sys.argv = ['cerca_casa.py', '--links',"
+         " '--no-color']; runpy.run_path('cerca_casa.py', run_name='__main__')"],
+        cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert risultato.returncode == 0, risultato.stderr
+    assert "LINK DI RICERCA" in risultato.stdout
+    assert "immobiliare.it" in risultato.stdout
+
+
+def test_lo_scraping_dichiara_le_dipendenze_mancanti():
+    risultato = subprocess.run(
+        [sys.executable, "-c",
+         BLOCCA_DEPENDENZE + "\nimport runpy, sys; sys.argv = ['cerca_casa.py', '--zona',"
+         " 'ostiense', '--no-color']; runpy.run_path('cerca_casa.py', run_name='__main__')"],
+        cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert risultato.returncode == 2
+    assert "Dipendenze mancanti" in risultato.stderr
+    assert "bs4" in risultato.stderr
+    assert "--links" in risultato.stderr  # suggerisce la via che funziona comunque
+
+
+def test_le_dipendenze_del_progetto_sono_installate_qui():
+    """Nel virtualenv del progetto non deve mancare nulla."""
+    assert cli._mancano_dipendenze() is False

@@ -9,11 +9,21 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
-import requests
-
 from .config import Config
+
+if TYPE_CHECKING:
+    import requests
+
+# Importata qui per non obbligare chi usa solo --links ad avere requests
+# installato: la sessione serve solo per il download effettivo.
+_ERRORI_REQUESTS = {
+    "ConnectionError", "ConnectTimeout", "HTTPError", "ReadTimeout",
+    "Timeout", "TooManyRedirects", "InvalidURL", "ChunkedEncodingError",
+    "ProxyError", "SSLError", "RequestException",
+}
 
 # Indicatori tipici di una pagina di blocco, da distinguere da "zero risultati".
 SEGNALI_ANTIBOT = (
@@ -57,6 +67,8 @@ class Limitatore:
 
 
 def crea_sessione(cfg: Config) -> requests.Session:
+    import requests  # noqa: PLC0415 - caricato qui, vedi nota in fondo al modulo
+
     sessione = requests.Session()
     sessione.headers.update({
         "User-Agent": cfg.user_agent,
@@ -69,6 +81,43 @@ def crea_sessione(cfg: Config) -> requests.Session:
 def _pagina_bloccata(html: str) -> bool:
     testo = html[:20_000].lower()
     return any(segnale in testo for segnale in SEGNALI_ANTIBOT)
+
+
+def _prova_una(
+    sessione: requests.Session,
+    url: str,
+    cfg: Config,
+    tentativo: int,
+) -> tuple[str | None, str]:
+    """Un tentativo di download.
+
+    Restituisce (html, motivo_del_rinvio): l'HTML se la pagina va bene, altrimenti
+    None e la causa, da riportare se tutti i tentativi falliscono. Solleva
+    ErroreAntiBot / ErroreHTTP quando riprovare non serve.
+    """
+    risposta = sessione.get(url, timeout=cfg.timeout)
+
+    if risposta.status_code in (403, 429):
+        attesa = _retry_after(risposta)
+        if tentativo < cfg.tentativi and attesa is not None:
+            # Il sito ha chiesto esplicitamente di aspettare: si ascolta.
+            time.sleep(min(attesa, 30))
+            return None, f"HTTP {risposta.status_code} (blocco temporaneo)"
+        raise ErroreAntiBot(
+            f"{urlsplit(url).netloc} ha bloccato la richiesta (HTTP {risposta.status_code})."
+        )
+    if risposta.status_code >= 500:
+        return None, f"HTTP {risposta.status_code}"  # errore del sito: si riprova
+    if risposta.status_code >= 400:
+        raise ErroreHTTP(f"{url} -> HTTP {risposta.status_code}")
+
+    html = risposta.text
+    if _pagina_bloccata(html):
+        raise ErroreAntiBot(
+            f"{urlsplit(url).netloc} ha risposto con una pagina di verifica "
+            f"anti-bot invece dei risultati."
+        )
+    return html, ""
 
 
 def scarica(
@@ -84,32 +133,14 @@ def scarica(
         if limitatore:
             limitatore.attendi(url)
         try:
-            risposta = sessione.get(url, timeout=cfg.timeout)
-        except requests.RequestException as exc:
-            ultimo_problema = f"{type(exc).__name__}: {exc}"
-        else:
-            if risposta.status_code in (403, 429):
-                attesa = _retry_after(risposta)
-                if tentativo < cfg.tentativi and attesa is not None:
-                    time.sleep(min(attesa, 30))  # esplicitamente richiesto dal sito
-                    ultimo_problema = f"HTTP {risposta.status_code} (blocco temporaneo)"
-                    continue
-                raise ErroreAntiBot(
-                    f"{urlsplit(url).netloc} ha bloccato la richiesta (HTTP "
-                    f"{risposta.status_code})."
-                )
-            if risposta.status_code >= 500:
-                ultimo_problema = f"HTTP {risposta.status_code}"
-            elif risposta.status_code >= 400:
-                raise ErroreHTTP(f"{url} -> HTTP {risposta.status_code}")
-            else:
-                html = risposta.text
-                if _pagina_bloccata(html):
-                    raise ErroreAntiBot(
-                        f"{urlsplit(url).netloc} ha risposto con una pagina di verifica "
-                        f"anti-bot invece dei risultati."
-                    )
-                return html
+            html, motivo = _prova_una(sessione, url, cfg, tentativo)
+        except Exception as exc:  # noqa: BLE001 - solo gli errori di rete si riprovano
+            if type(exc).__name__ not in _ERRORI_REQUESTS:
+                raise
+            html, motivo = None, f"{type(exc).__name__}: {exc}"
+        if html is not None:
+            return html
+        ultimo_problema = motivo
 
         if tentativo < cfg.tentativi:
             time.sleep(min(cfg.backoff * 2 ** (tentativo - 1), 8))
@@ -126,3 +157,9 @@ def _retry_after(risposta: requests.Response) -> float | None:
         return float(valore)
     except ValueError:
         return None
+
+
+# Nota: `requests` è importato dentro le funzioni che lo usano, non a livello
+# di modulo, così `--links` (che costruisce solo URL, senza rete) funziona anche
+# se le dipendenze non sono installate. Gli errori di rete sono riconosciuti per
+# nome di classe: è l'unico modo per trattarli senza importare requests qui.

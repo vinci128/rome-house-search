@@ -3,6 +3,8 @@
 import pytest
 
 from romasearch.config import ZONE, Config, CostiRistrutturazione, get_zona
+from romasearch.scrapers import casa, idealista, immobiliare
+from romasearch.scrapers.base import link_ricerca
 
 
 def test_predefiniti():
@@ -85,3 +87,24 @@ def test_tutte_le_zone_hanno_i_dati_per_i_portali():
         assert zona.slug_idealista, nome
         assert zona.ricerca_casa, nome
         assert zona.indirizzo_fallback.startswith("Roma"), nome
+
+
+def test_garbatella_e_ostiense_sono_disponibili():
+    for nome in ("garbatella", "ostiense"):
+        zona = get_zona(nome)
+        assert zona.slug_immobiliare == f"{nome}-roma"
+        assert zona.slug_idealista == nome
+        assert zona.ricerca_casa == nome
+
+
+@pytest.mark.parametrize("nome", ["garbatella", "ostiense"])
+def test_gli_url_di_garbatella_e_ostiense_menzionano_il_quartiere(nome):
+    zona = get_zona(nome)
+    config = Config()
+    for modulo in (immobiliare, idealista, casa):
+        for url in link_ricerca(modulo.url_ricerca, modulo.url_da_ristrutturare, zona, config):
+            assert nome in url, (modulo.SITO, url)
+            # La ricerca normale arriva al tetto con il margine, quella da
+            # ristrutturare si ferma al prezzo che lascia spazio ai lavori.
+            assert any(str(tetto) in url for tetto in (
+                config.prezzo_max_ricerca, config.prezzo_max_da_ristrutturare)), (modulo.SITO, url)

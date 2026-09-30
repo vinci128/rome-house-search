@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-import requests
+from typing import TYPE_CHECKING
 
 from ..config import Config, Zona
 from ..http import Limitatore
 from ..models import Annuncio
 from .base import ProfiloSito, link_ricerca, scarica_e_estrai
+
+if TYPE_CHECKING:
+    import requests
+
 
 SITO = "casa.it"
 DOMINIO = "www.casa.it"

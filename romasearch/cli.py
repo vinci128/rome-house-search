@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import sys
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from . import __version__, report
 from .config import ZONE, Config, CostiRistrutturazione
 from .formato import euro
 from .report import Colori, Metadati
-from .scrapers import raccogli
+from .scrapers import Raccolta, raccogli
 from .valutazione import riepilogo_scarti, seleziona, valuta_tutti
 
 DEFAULT_OUTPUT = "risultati_casa.json"
@@ -100,6 +101,61 @@ def config_da_argomenti(args: argparse.Namespace) -> Config:
     )
 
 
+def _mancano_dipendenze() -> bool:
+    """True se manca qualcosa per leggere le pagine, spiegando come installarlo.
+
+    Prima di scaricare: senza questi moduli non si può estrarre nulla, e
+    fallire qui è molto più utile che fallire sul primo annuncio.
+    """
+    mancanti = []
+    for modulo in ("requests", "bs4", "lxml"):
+        try:
+            importlib.import_module(modulo)
+        except ImportError:
+            mancanti.append(modulo)
+    if not mancanti:
+        return False
+
+    print(f"\nDipendenze mancanti: {', '.join(mancanti)}.", file=sys.stderr)
+    print("Installale con:", file=sys.stderr)
+    print("    python3 -m venv .venv && .venv/bin/pip install -r requirements.txt\n",
+          file=sys.stderr)
+    print(f"Python in uso: {sys.executable}", file=sys.stderr)
+    print("Nel dubbio: --links funziona anche senza dipendenze.", file=sys.stderr)
+    return True
+
+
+def _segnala_problemi(raccolta: Raccolta, verboso: bool) -> None:
+    """I problemi di raccolta, sempre se non è andato tutto bene."""
+    if verboso or not raccolta.annunci:
+        for problema in raccolta.problemi:
+            print(f"  {report.giallo('!')} {problema}", file=sys.stderr)
+    if any("bloccato" in p or "anti-bot" in p for p in raccolta.problemi):
+        print(report.rosso("Alcuni portali hanno bloccato la raccolta automatica: "
+                           "usa --links per la ricerca manuale."), file=sys.stderr)
+
+
+def _salva(buone: list, raccolta: Raccolta, cfg: Config, args: argparse.Namespace) -> None:
+    """Scrive JSON ed eventuale CSV, o spiega perché non c'è niente da salvare."""
+    if args.no_salva or not buone:
+        if not args.no_salva:
+            print(f"Nessun annuncio da salvare in {args.output}.")
+        return
+
+    meta = Metadati(
+        config=cfg,
+        per_sito=raccolta.per_sito,
+        problemi=raccolta.problemi,
+        annunci_letti=len(raccolta.annunci),
+    )
+    report.esporta_json(args.output, buone, meta)
+    scritti = [str(args.output)]
+    if args.csv:
+        report.esporta_csv(args.csv, buone)
+        scritti.append(str(args.csv))
+    print(f"Risultati salvati in {', '.join(scritti)} ({len(buone)} annunci)")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = costruisci_parser()
     args = parser.parse_args(argv)
@@ -116,6 +172,9 @@ def main(argv: list[str] | None = None) -> int:
         report.stampa_link(sys.stdout, cfg)
         return 0
 
+    if _mancano_dipendenze():
+        return 2
+
     zone = ", ".join(z.etichetta for z in cfg.zone_risolte)
     print(f"Ricerca casa a Roma — {zone}")
     print(f"Budget {euro(cfg.budget)} · tetto di ricerca {euro(cfg.prezzo_max_ricerca)} · "
@@ -127,12 +186,7 @@ def main(argv: list[str] | None = None) -> int:
     for sito, totale in sorted(raccolta.per_sito.items()):
         print(f"    {sito:<18} {totale}")
 
-    if args.verbose or not raccolta.annunci:
-        for problema in raccolta.problemi:
-            print(f"  {report.giallo('!')} {problema}", file=sys.stderr)
-    if any("bloccato" in problema or "anti-bot" in problema for problema in raccolta.problemi):
-        print(report.rosso("Alcuni portali hanno bloccato la raccolta automatica: "
-                           "usa --links per la ricerca manuale."), file=sys.stderr)
+    _segnala_problemi(raccolta, args.verbose)
 
     valutazioni = valuta_tutti(raccolta.annunci, cfg)
     buone = seleziona(valutazioni, cfg)
@@ -148,21 +202,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"    {quanti:>3} × {motivo}", file=sys.stderr)
         print(file=sys.stderr)
 
-    if not args.no_salva and buone:
-        meta = Metadati(
-            config=cfg,
-            per_sito=raccolta.per_sito,
-            problemi=raccolta.problemi,
-            annunci_letti=len(raccolta.annunci),
-        )
-        report.esporta_json(args.output, buone, meta)
-        scritti = [str(args.output)]
-        if args.csv:
-            report.esporta_csv(args.csv, buone)
-            scritti.append(str(args.csv))
-        print(f"Risultati salvati in {', '.join(scritti)} ({len(buone)} annunci)")
-    elif not args.no_salva:
-        print(f"Nessun annuncio da salvare in {args.output}.")
+    _salva(buone, raccolta, cfg, args)
 
     if not buone:
         print("Nessun risultato: prova  python3 cerca_casa.py --links  "
